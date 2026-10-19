@@ -19,7 +19,7 @@
   });
 
   const ST = {
-    user: null, me: null, rows: [], settings: {}, suppliers: [], overrides: [], imports: [], users: [],
+    user: null, me: null, rows: [], settings: {}, suppliers: [], overrides: [], imports: [], users: [], requests: [],
     res: null, tab: "overview",
     buy: { q: "", type: "ALL", view: "order", abc: "", buyer: "", supplier: "", sort: ["orderValue", -1], limit: 200 },
     restock: { branch: null, q: "", view: "send", sort: ["sendValue", -1], limit: 200 },
@@ -167,7 +167,7 @@
 
   async function loadAll() {
     if (PREVIEW) {
-      Object.assign(ST, { rows: PREVIEW.rows, settings: PREVIEW.settings || {}, suppliers: PREVIEW.suppliers || [], overrides: PREVIEW.overrides || [], imports: PREVIEW.imports || [], users: PREVIEW.users || [] });
+      Object.assign(ST, { rows: PREVIEW.rows, settings: PREVIEW.settings || {}, suppliers: PREVIEW.suppliers || [], overrides: PREVIEW.overrides || [], imports: PREVIEW.imports || [], users: PREVIEW.users || [], requests: PREVIEW.requests || [] });
       return;
     }
     const [rows, set, sup, ov, imp] = await Promise.all([
@@ -180,7 +180,10 @@
     ST.rows = rows;
     ST.settings = set.data ? set.data.data : {};
     ST.suppliers = sup.data || []; ST.overrides = ov.data || []; ST.imports = imp.data || [];
-    if (ST.me.role === "admin") { const u = await db.from("sp_users").select("*").order("name"); ST.users = u.data || []; }
+    if (ST.me.role === "admin") {
+      const [u, rq] = await Promise.all([db.from("sp_users").select("*").order("name"), db.from("sp_access_requests").select("*").order("created_at")]);
+      ST.users = u.data || []; ST.requests = rq.data || [];
+    }
   }
 
   function replan() { ST.res = E.plan(ST.rows, ST.settings, ST.suppliers, ST.overrides); }
@@ -191,18 +194,14 @@
   async function start() {
     if (PREVIEW) {
       ST.user = { email: PREVIEW.email || "preview@brigit.co.za" };
-      ST.me = { email: ST.user.email, name: "Preview", role: PREVIEW.role || "admin" };
+      ST.me = { email: ST.user.email, name: "Preview", role: PREVIEW.role || "admin", buyer_codes: PREVIEW.buyer_codes || [] };
     } else {
       const { data: { session } } = await db.auth.getSession();
       if (!session || /type=recovery/.test(location.hash)) { $("#login").hidden = false; wireLogin(); return; }
       ST.user = session.user;
       const email = (ST.user.email || "").toLowerCase();
       const { data: me } = await db.from("sp_users").select("*").eq("email", email).maybeSingle();
-      if (!me) {
-        $("#noaccess").hidden = false; $("#na-email").textContent = email;
-        $("#na-signout").onclick = async () => { await db.auth.signOut(); location.reload(); };
-        return;
-      }
+      if (!me) { await showRequest(email); return; }
       ST.me = me;
     }
     $("#app").hidden = false;
@@ -211,11 +210,50 @@
     $("#signout").onclick = async () => { if (db) await db.auth.signOut(); location.reload(); };
     try { await loadAll(); }
     catch (err) { $("#main").innerHTML = `<div class="empty">Couldn't load the stock data: ${esc(err.message || err)}</div>`; return; }
+    if (myCodes().length) ST.buy.buyer = "MINE";
+    renderBadge();
     if (!ST.rows.length) { renderFreshness(); location.hash = "#data"; }
     replan();
     renderFreshness();
     window.addEventListener("hashchange", route);
     route();
+  }
+
+  /* ---------- new person: ask for access and pick buyer codes ---------- */
+  async function showRequest(email) {
+    $("#noaccess").hidden = false; $("#na-email").textContent = email;
+    $("#na-signout").onclick = async () => { await db.auth.signOut(); location.reload(); };
+    const msg = (t, cls = "muted") => { const m = $("#na-msg"); m.textContent = t; m.className = "login-msg " + cls; };
+    const [codesRes, reqRes] = await Promise.all([
+      db.rpc("sp_buyer_codes"),
+      db.from("sp_access_requests").select("*").eq("email", email).maybeSingle()
+    ]);
+    const codes = codesRes.data || [], req = reqRes.data;
+    const picked = new Set(req ? req.buyer_codes || [] : []);
+    const draw = () => {
+      $("#na-codes").innerHTML = codes.length ? codes.map(c => `<button type="button" class="chip-toggle ${picked.has(c.buyer) ? "on" : ""}" data-c="${esc(c.buyer)}" aria-pressed="${picked.has(c.buyer)}">${esc(c.buyer)} <small>${nf0.format(c.items)} items</small></button>`).join("")
+        : `<span class="muted">No stock data loaded yet: leave this empty and mention your buyer code in the note.</span>`;
+    };
+    draw();
+    $("#na-codes").onclick = e => { const b = e.target.closest("[data-c]"); if (!b) return; picked.has(b.dataset.c) ? picked.delete(b.dataset.c) : picked.add(b.dataset.c); draw(); };
+    const f = $("#na-form");
+    if (req) { f.name.value = req.name || ""; f.note.value = req.note || ""; msg(`Request sent ${dateTime(req.created_at)}. You'll get access once an admin approves it — refresh this page then. You can still change it below.`, "good-t"); f.querySelector("button[type=submit]").textContent = "Update request"; }
+    f.onsubmit = async e => {
+      e.preventDefault();
+      const row = { email, name: f.name.value.trim(), buyer_codes: [...picked], note: f.note.value.trim() || null };
+      f.querySelector("button[type=submit]").disabled = true;
+      const { error } = await db.from("sp_access_requests").upsert(row);
+      f.querySelector("button[type=submit]").disabled = false;
+      if (error) return msg(error.message, "bad-t");
+      msg("Request sent. An admin will approve it — then refresh this page.", "good-t");
+      f.querySelector("button[type=submit]").textContent = "Update request";
+    };
+  }
+
+  const myCodes = () => (ST.me && ST.me.buyer_codes) || [];
+  function renderBadge() {
+    const a = $('#tabs a[data-tab="settings"]'); if (!a) return;
+    a.innerHTML = "Settings" + (ST.requests.length ? `<span class="badge" title="Access requests waiting">${ST.requests.length}</span>` : "");
   }
 
   function renderFreshness() {
@@ -292,7 +330,7 @@
       <div class="page-head"><div class="grow"><h2>Overview</h2>
         <p class="lede">What to buy into M1, what to send to the branches, and where money is tied up. Local items are planned for ${esc(R.settings.coverMonths.LOCAL)} months' stock and foreign items for ${esc(R.settings.coverMonths.FOREIGN)} months.</p></div></div>
       <div class="grid kpis">
-        <a class="kpi" href="#buy"><div class="k-label">${ICON.cart} To buy</div><div class="k-value">${randShort(S.buyValue)}</div><div class="k-sub">${nf0.format(S.buyLines)} items · ${nf0.format(R.items.filter(i => i.action === "BUY" && i.status === "URGENT").length)} urgent</div></a>
+        <a class="kpi" href="#buy"><div class="k-label">${ICON.cart} To buy</div><div class="k-value">${randShort(S.buyValue)}</div><div class="k-sub">${nf0.format(S.buyLines)} items · ${nf0.format(R.items.filter(i => i.action === "BUY" && i.status === "URGENT").length)} urgent</div>${myCodes().length ? (() => { const mine = R.items.filter(i => i.action === "BUY" && myCodes().includes(i.buyer)); return `<div class="k-sub"><b>Yours (${esc(myCodes().join(", "))}):</b> ${nf0.format(mine.length)} items · ${randShort(mine.reduce((t, i) => t + i.orderValue, 0))}</div>`; })() : ""}</a>
         <a class="kpi" href="#buy"><div class="k-label">${ICON.gear} To make (in-house)</div><div class="k-value">${randShort(S.makeValue)}</div><div class="k-sub">${nf0.format(S.makeLines)} items</div></a>
         <a class="kpi" href="#restock"><div class="k-label">${ICON.truck} Send to branches</div><div class="k-value">${randShort(branches.reduce((t, b) => t + S.branches[b].value, 0))}</div><div class="k-sub">${nf0.format(branches.reduce((t, b) => t + S.branches[b].lines, 0))} lines from M1</div></a>
         <a class="kpi" href="#health"><div class="k-label">${ICON.box} Above max</div><div class="k-value">${randShort(S.overstockValue)}</div><div class="k-sub">${nf0.format(S.overstockLines)} items overstocked</div></a>
@@ -352,7 +390,8 @@
       if (f.view === "slow" && i.status !== "SLOW MOVER") return false;
       if (f.type !== "ALL" && i.type !== f.type) return false;
       if (f.abc && i.abc !== f.abc) return false;
-      if (f.buyer && i.buyer !== f.buyer) return false;
+      if (f.buyer === "MINE") { if (!myCodes().includes(i.buyer)) return false; }
+      else if (f.buyer && i.buyer !== f.buyer) return false;
       return match(q, i.code, i.description, i.supplier, i.product_class);
     });
   }
@@ -368,7 +407,7 @@
         ${seg("view", BUY_VIEWS, f.view)}
         ${seg("type", [["ALL", "All"], ["LOCAL", "Local"], ["FOREIGN", "Foreign"], ["IN-HOUSE", "In-house"]], f.type)}
         <select id="abc" aria-label="ABC class">${opts(["A", "B", "C"], f.abc, "All classes")}</select>
-        <select id="buyer" aria-label="Buyer">${opts(buyers, f.buyer, "All buyers")}</select>
+        <select id="buyer" aria-label="Buyer">${myCodes().length ? `<option value="MINE" ${f.buyer === "MINE" ? "selected" : ""}>My items (${esc(myCodes().join(", "))})</option>` : ""}${opts(buyers, f.buyer, "All buyers")}</select>
         <span class="spacer"></span><span class="count-note" id="count"></span>
         <button class="btn small ghost" type="button" id="tog-sups">${hideSups() ? "Show suppliers" : "Hide suppliers"}</button>
       </div>
@@ -735,6 +774,7 @@
     const buyers = [...new Set(ST.res.items.map(i => i.buyer).filter(Boolean))].sort();
     const sel = (name, val, list) => `<select name="${name}">${list.map(([v, l]) => `<option value="${esc(v)}" ${String(v) === String(val) ? "selected" : ""}>${esc(l)}</option>`).join("")}</select>`;
     const types = [["LOCAL", "Local"], ["FOREIGN", "Foreign"], ["IN-HOUSE", "In-house"]];
+    const codeChips = picked => buyers.map(b => `<button type="button" class="chip-toggle ${picked.includes(b) ? "on" : ""}" data-code="${esc(b)}">${esc(b)}</button>`).join("");
     $("#main").innerHTML = `
       <div class="page-head"><div class="grow"><h2>Settings</h2><p class="lede">Planning rules for everyone. Changes apply as soon as you save.</p></div></div>
       <form id="set" class="grid settings-sections">
@@ -763,17 +803,27 @@
         </div></div>
         <div style="grid-column:1/-1"><button class="btn primary" type="submit">Save settings</button> <span id="set-msg" class="muted"></span></div>
       </form>
-      <div class="grid two" style="margin-top:18px">
+      <div class="card" style="margin-top:18px"><h3>Who can use the planner ${ST.requests.length ? `<span class="badge">${ST.requests.length} waiting</span>` : ""}</h3>
+        ${ST.requests.length ? `<h3 style="margin-top:8px">Access requests</h3>
+        <table class="mini"><thead><tr><th>Name</th><th>Email</th><th>Asked for</th><th>Note</th><th>Role</th><th></th></tr></thead><tbody>
+          ${ST.requests.map(r => `<tr class="req-row"><td><b>${esc(r.name)}</b><div class="muted" style="font-size:12px">${esc(dateTime(r.created_at))}</div></td><td>${esc(r.email)}</td>
+            <td><div class="chips" data-req-codes="${esc(r.email)}">${codeChips(r.buyer_codes || [])}</div></td><td class="muted">${esc(r.note || "")}</td>
+            <td>${sel("role", (r.buyer_codes || []).length ? "buyer" : "viewer", [["buyer", "Buyer"], ["viewer", "Viewer"], ["admin", "Admin"]]).replace("<select", `<select data-req-role="${esc(r.email)}"`)}</td>
+            <td style="white-space:nowrap"><button class="btn small primary" type="button" data-approve="${esc(r.email)}">Approve</button> <button class="btn small ghost" type="button" data-decline="${esc(r.email)}">Decline</button></td></tr>`).join("")}
+        </tbody></table><h3 style="margin-top:18px">Current users</h3>` : ""}
+        <table class="mini"><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Buyer codes (click to switch on/off)</th><th></th></tr></thead><tbody>
+          ${ST.users.map(u => `<tr><td>${esc(u.name)}</td><td>${esc(u.email)}</td><td>${sel("role", u.role, [["admin", "Admin"], ["buyer", "Buyer"], ["viewer", "Viewer"]]).replace("<select", `<select data-email="${esc(u.email)}"`)}</td>
+            <td><div class="chips" data-user-codes="${esc(u.email)}">${codeChips(u.buyer_codes || [])}</div></td>
+            <td>${u.email === (ST.me.email || "") ? "" : `<button class="btn small ghost" type="button" data-del="${esc(u.email)}">Remove</button>`}</td></tr>`).join("")}
+        </tbody></table>
+        <form id="adduser" class="inline-inputs" style="margin-top:12px"><input name="name" type="text" placeholder="Name" required><input name="email" type="email" placeholder="name@brigit.co.za" required>${sel("role", "buyer", [["buyer", "Buyer"], ["viewer", "Viewer"], ["admin", "Admin"]])}<button class="btn" type="submit">Add</button></form>
+        <p class="muted" style="font-size:12px">Buyer codes link a person to their stock codes in SYSPRO: their Buy page opens on "My items". Buyers can set item exclusions, lead times and notes; viewers can only look; admins also change settings, users and load data. New people register on the sign-in page and send an access request, which shows here.</p>
+      </div>
+      <div class="grid" style="margin-top:18px">
         <div class="card"><h3>Supplier lead times</h3><p class="muted" style="margin-top:0">Overrides Qlik and the defaults for every item from that supplier. Suppliers with something to order are listed first.</p>
           <input type="search" id="sq" placeholder="Search supplier…" style="width:100%;margin-bottom:8px"><div id="sup-tbl" style="max-height:420px;overflow:auto"></div></div>
-        <div class="card"><h3>Who can use the planner</h3>
-          <table class="mini"><thead><tr><th>Name</th><th>Email</th><th>Role</th><th></th></tr></thead><tbody>
-            ${ST.users.map(u => `<tr><td>${esc(u.name)}</td><td>${esc(u.email)}</td><td>${sel("role", u.role, [["admin", "Admin"], ["buyer", "Buyer"], ["viewer", "Viewer"]]).replace("<select", `<select data-email="${esc(u.email)}"`)}</td><td>${u.email === (ST.me.email || "") ? "" : `<button class="btn small ghost" type="button" data-del="${esc(u.email)}">Remove</button>`}</td></tr>`).join("")}
-          </tbody></table>
-          <form id="adduser" class="inline-inputs" style="margin-top:12px"><input name="name" placeholder="Name" required><input name="email" type="email" placeholder="name@brigit.co.za" required>${sel("role", "buyer", [["buyer", "Buyer"], ["viewer", "Viewer"], ["admin", "Admin"]])}<button class="btn" type="submit">Add</button></form>
-          <p class="muted" style="font-size:12px">Buyers can set item exclusions, lead times and notes. Viewers can only look. Admins also change settings, users and load data. New people register on the sign-in page with the same email.</p>
-        </div>
-      </div>`;
+      </div>
+`;
 
     $("#set").onsubmit = async e => {
       e.preventDefault(); const f = e.target, n = k => Number(f[k].value);
@@ -824,9 +874,34 @@
       if (db) { const { error } = await db.from("sp_users").delete().eq("email", b.dataset.del); if (error) return toast(error.message); }
       ST.users = ST.users.filter(u => u.email !== b.dataset.del); renderSettings();
     });
+    const toggleIn = (list, code) => list.includes(code) ? list.filter(c => c !== code) : list.concat([code]);
+    $$("[data-user-codes]").forEach(box => box.onclick = async e => {
+      const b = e.target.closest("[data-code]"); if (!b) return;
+      const u = ST.users.find(x => x.email === box.dataset.userCodes); const next = toggleIn(u.buyer_codes || [], b.dataset.code);
+      if (db) { const { error } = await db.from("sp_users").update({ buyer_codes: next }).eq("email", u.email); if (error) return toast(error.message); }
+      u.buyer_codes = next; if (u.email === ST.me.email) ST.me.buyer_codes = next;
+      b.classList.toggle("on"); toast(`${u.name}: ${next.length ? next.join(", ") : "no buyer codes"}`);
+    });
+    $$("[data-req-codes]").forEach(box => box.onclick = e => {
+      const b = e.target.closest("[data-code]"); if (!b) return;
+      const r = ST.requests.find(x => x.email === box.dataset.reqCodes); r.buyer_codes = toggleIn(r.buyer_codes || [], b.dataset.code); b.classList.toggle("on");
+    });
+    $$("[data-approve]").forEach(b => b.onclick = async () => {
+      const r = ST.requests.find(x => x.email === b.dataset.approve);
+      const row = { email: r.email, name: r.name, role: $(`[data-req-role="${CSS.escape(r.email)}"]`).value, buyer_codes: r.buyer_codes || [] };
+      if (db) {
+        const { error } = await db.from("sp_users").upsert(row); if (error) return toast(error.message);
+        await db.from("sp_access_requests").delete().eq("email", r.email);
+      }
+      ST.users.push(row); ST.requests = ST.requests.filter(x => x.email !== r.email); renderBadge(); renderSettings(); toast(`${r.name} approved`);
+    });
+    $$("[data-decline]").forEach(b => b.onclick = async () => {
+      if (db) { const { error } = await db.from("sp_access_requests").delete().eq("email", b.dataset.decline); if (error) return toast(error.message); }
+      ST.requests = ST.requests.filter(x => x.email !== b.dataset.decline); renderBadge(); renderSettings(); toast("Request declined");
+    });
     $("#adduser").onsubmit = async e => {
       e.preventDefault(); const f = e.target;
-      const row = { name: f.name.value.trim(), email: f.email.value.trim().toLowerCase(), role: f.role.value };
+      const row = { name: f.name.value.trim(), email: f.email.value.trim().toLowerCase(), role: f.role.value, buyer_codes: [] };
       if (db) { const { error } = await db.from("sp_users").insert(row); if (error) return toast(error.message); }
       ST.users.push(row); renderSettings(); toast(`${row.name} added`);
     };

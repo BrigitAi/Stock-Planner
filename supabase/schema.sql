@@ -374,6 +374,37 @@ grant execute on function public.sp_import_begin(text, date, text), public.sp_im
 grant execute on function public.sp_is_member(), public.sp_is_admin(), public.sp_can_edit(), public.sp_my_email() to authenticated;
 
 -- =====================================================================
+-- BUYERS: link people to their SYSPRO buyer codes, and let new people ask for access
+-- =====================================================================
+alter table public.sp_users add column if not exists buyer_codes text[] not null default '{}';
+
+create table if not exists public.sp_access_requests (
+  email       text primary key check (email = lower(email)),
+  name        text not null check (char_length(name) between 2 and 80),
+  buyer_codes text[] not null default '{}',
+  note        text check (note is null or char_length(note) <= 300),
+  created_at  timestamptz not null default now()
+);
+alter table public.sp_access_requests enable row level security;
+drop policy if exists sp_req_own    on public.sp_access_requests;
+drop policy if exists sp_req_admin  on public.sp_access_requests;
+create policy sp_req_own   on public.sp_access_requests for all to authenticated
+  using (email = public.sp_my_email()) with check (email = public.sp_my_email());
+create policy sp_req_admin on public.sp_access_requests for all to authenticated
+  using (public.sp_is_admin()) with check (public.sp_is_admin());
+grant select, insert, update, delete on public.sp_access_requests to authenticated;
+
+-- buyer codes found in the stock data (codes and counts only), so a new person can pick theirs
+create or replace function public.sp_buyer_codes()
+returns table (buyer text, items bigint) language sql stable security definer set search_path = public as $$
+  select buyer, count(distinct stock_code) from public.sp_stock
+   where buyer is not null and auth.uid() is not null
+   group by buyer order by count(distinct stock_code) desc
+$$;
+revoke all on function public.sp_buyer_codes() from public, anon;
+grant execute on function public.sp_buyer_codes() to authenticated;
+
+-- =====================================================================
 -- FIRST USERS — edit names/emails, then run. Add buyers in the app later.
 -- =====================================================================
 insert into public.sp_users (email, name, role) values

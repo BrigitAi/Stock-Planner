@@ -70,10 +70,17 @@
 <section id="noaccess" class="gate" hidden>
   <div class="gate-card">
     <img src="logo.png" alt="Brigit Fire" class="gate-logo">
-    <h1>Almost there</h1>
-    <p>You're signed in as <b id="na-email"></b>, but you haven't been given access to the Stock Planner yet.</p>
-    <p class="muted">Ask Lasya (ERP &amp; BI) to add you. Then refresh this page.</p>
-    <button class="btn" id="na-signout" type="button">Sign out</button>
+    <h1>Request access</h1>
+    <p>You're signed in as <b id="na-email"></b>. Tell us who you are and which stock you buy, and an admin will switch you on.</p>
+    <form id="na-form" class="auth-form">
+      <input name="name" type="text" placeholder="Your name and surname" autocomplete="name" aria-label="Name" required minlength="2" maxlength="80">
+      <div><div class="muted" style="margin-bottom:6px">Your SYSPRO buyer code(s), the stock codes you're responsible for:</div>
+        <div class="chips" id="na-codes"><span class="muted">Loading…</span></div></div>
+      <textarea name="note" placeholder="Anything else? (optional, e.g. 'I only need to view')" maxlength="300" rows="2"></textarea>
+      <button class="btn primary" type="submit">Send request</button>
+    </form>
+    <p id="na-msg" class="login-msg" role="status"></p>
+    <button class="btn ghost small" id="na-signout" type="button">Sign out</button>
   </div>
 </section>
 

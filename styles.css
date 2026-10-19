@@ -225,3 +225,11 @@ table.mini tr.click { cursor: pointer; } table.mini tr.click:hover td { backgrou
   .filters input[type=search] { width: 100%; }
 }
 table.data td.nowrap { white-space: nowrap; }
+
+/* buyer-code chips */
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip-toggle { border: 1px solid var(--line-strong); background: var(--surface); border-radius: 999px; padding: 4px 10px; font-size: 12.5px; font-weight: 600; cursor: pointer; color: var(--muted); }
+.chip-toggle.on { background: var(--navy); border-color: var(--navy); color: #fff; }
+.chip-toggle small { font-weight: 400; opacity: .8; }
+.badge { display: inline-block; min-width: 18px; padding: 0 5px; border-radius: 99px; background: var(--orange); color: #fff; font-size: 11px; font-weight: 700; text-align: center; margin-left: 4px; }
+.req-row td { vertical-align: middle; }
