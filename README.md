@@ -37,8 +37,13 @@ All of these can be changed by an admin under **Settings**.
 
 ### 1. Supabase
 1. Supabase → **SQL Editor** → New query → paste [`supabase/schema.sql`](supabase/schema.sql) → **Run**. It only adds `sp_*` tables and is safe to run again after updates.
-2. Supabase → **Authentication → URL Configuration → Redirect URLs** → add `https://brigitai.github.io/Stock-Planner/` (needed for password-reset links).
-3. The first admins are added at the bottom of the script. Add buyers in the app under **Settings → Who can use the planner**.
+2. Give the secret-key role a longer time limit, so n8n's imports aren't cut off at Supabase's default 8 seconds (SQL Editor):
+   ```sql
+   alter role service_role set statement_timeout = '120s';
+   notify pgrst, 'reload config';
+   ```
+3. Supabase → **Authentication → URL Configuration → Redirect URLs** → add `https://brigitai.github.io/Stock-Planner/` (needed for password-reset links).
+4. The first admins are added at the bottom of the script. Add buyers in the app under **Settings → Who can use the planner**.
 
 ### 2. n8n (Qlik → planner)
 1. Supabase → **Project Settings → API Keys** → copy the **secret** key (`sb_secret_…`). Never put it in this repo.
