@@ -404,6 +404,49 @@ $$;
 revoke all on function public.sp_buyer_codes() from public, anon;
 grant execute on function public.sp_buyer_codes() to authenticated;
 
+-- ---------- SYSPRO buyers (code, name, email) ----------
+create table if not exists public.sp_buyers (
+  code  text primary key check (code = upper(code)),
+  name  text not null,
+  email text check (email is null or email = lower(email))
+);
+alter table public.sp_buyers enable row level security;
+drop policy if exists sp_buyers_read  on public.sp_buyers;
+drop policy if exists sp_buyers_admin on public.sp_buyers;
+create policy sp_buyers_read  on public.sp_buyers for select to authenticated using (true);
+create policy sp_buyers_admin on public.sp_buyers for all to authenticated using (public.sp_is_admin()) with check (public.sp_is_admin());
+grant select, insert, update, delete on public.sp_buyers to authenticated;
+
+insert into public.sp_buyers (code, name, email) values
+  ('CC', 'Carmen Cornelissen', 'reception@brigit.co.za'),
+  ('CH', 'Chandre Rhoda', null),
+  ('CP', 'Chante Pretorius', 'admin2@brigit.co.za'),
+  ('HH', 'Hannelie Hydes', 'hannelie@brigit.co.za'),
+  ('INBRANCH', 'In branch', null),
+  ('IN-BRANCH', 'In branch', null),
+  ('JH', 'Julianne Hermans', 'salesadmin@brigit.co.za'),
+  ('LH', 'Linda Havenga', 'creditors@brigit.co.za'),
+  ('LK', 'Leane de Klerk', 'admin@brigit.co.za'),
+  ('MG', 'Martie Greeff', 'admin2@brigit.co.za'),
+  ('MV', 'Mercia Venter', 'creditors@brigit.co.za'),
+  ('PRODUCTION', 'Production', null),
+  ('SV', 'Sandra Vorster', 'sandy@brigit.co.za'),
+  ('TC', 'Twane Coetzee', 'twane@brigit.co.za')
+on conflict (code) do update set name = excluded.name, email = excluded.email;
+
+-- buyer codes with names and how many stock codes each has
+drop function if exists public.sp_buyer_codes();
+create or replace function public.sp_buyer_codes()
+returns table (buyer text, name text, email text, items bigint) language sql stable security definer set search_path = public as $$
+  select coalesce(s.buyer, b.code), b.name, b.email, coalesce(s.items, 0)
+    from (select buyer, count(distinct stock_code) items from public.sp_stock where buyer is not null group by buyer) s
+    full join public.sp_buyers b on b.code = s.buyer
+   where auth.uid() is not null
+   order by coalesce(s.items, 0) desc, 1
+$$;
+revoke all on function public.sp_buyer_codes() from public, anon;
+grant execute on function public.sp_buyer_codes() to authenticated;
+
 -- =====================================================================
 -- FIRST USERS — edit names/emails, then run. Add buyers in the app later.
 -- =====================================================================

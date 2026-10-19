@@ -19,7 +19,7 @@
   });
 
   const ST = {
-    user: null, me: null, rows: [], settings: {}, suppliers: [], overrides: [], imports: [], users: [], requests: [],
+    user: null, me: null, rows: [], settings: {}, suppliers: [], overrides: [], imports: [], users: [], requests: [], buyers: [],
     res: null, tab: "overview",
     buy: { q: "", type: "ALL", view: "order", abc: "", buyer: "", supplier: "", sort: ["orderValue", -1], limit: 200 },
     restock: { branch: null, q: "", view: "send", sort: ["sendValue", -1], limit: 200 },
@@ -167,9 +167,10 @@
 
   async function loadAll() {
     if (PREVIEW) {
-      Object.assign(ST, { rows: PREVIEW.rows, settings: PREVIEW.settings || {}, suppliers: PREVIEW.suppliers || [], overrides: PREVIEW.overrides || [], imports: PREVIEW.imports || [], users: PREVIEW.users || [], requests: PREVIEW.requests || [] });
+      Object.assign(ST, { buyers: PREVIEW.buyers || [], rows: PREVIEW.rows, settings: PREVIEW.settings || {}, suppliers: PREVIEW.suppliers || [], overrides: PREVIEW.overrides || [], imports: PREVIEW.imports || [], users: PREVIEW.users || [], requests: PREVIEW.requests || [] });
       return;
     }
+    const bq = await db.from("sp_buyers").select("*"); ST.buyers = bq.data || [];
     const [rows, set, sup, ov, imp] = await Promise.all([
       fetchAll("sp_stock", STOCK_COLS, "stock_code"),
       db.from("sp_settings").select("data").eq("id", 1).maybeSingle(),
@@ -228,10 +229,11 @@
       db.rpc("sp_buyer_codes"),
       db.from("sp_access_requests").select("*").eq("email", email).maybeSingle()
     ]);
-    const codes = codesRes.data || [], req = reqRes.data;
-    const picked = new Set(req ? req.buyer_codes || [] : []);
+    const codes = (codesRes.data || []).filter(c => c.items > 0 || c.name), req = reqRes.data;
+    // first visit: tick the codes SYSPRO lists against this email
+    const picked = new Set(req ? req.buyer_codes || [] : codes.filter(c => (c.email || "").toLowerCase() === email).map(c => c.buyer));
     const draw = () => {
-      $("#na-codes").innerHTML = codes.length ? codes.map(c => `<button type="button" class="chip-toggle ${picked.has(c.buyer) ? "on" : ""}" data-c="${esc(c.buyer)}" aria-pressed="${picked.has(c.buyer)}">${esc(c.buyer)} <small>${nf0.format(c.items)} items</small></button>`).join("")
+      $("#na-codes").innerHTML = codes.length ? codes.map(c => `<button type="button" class="chip-toggle ${picked.has(c.buyer) ? "on" : ""}" data-c="${esc(c.buyer)}" aria-pressed="${picked.has(c.buyer)}">${esc(c.buyer)}${c.name ? " · " + esc(c.name) : ""} <small>${c.items ? nf0.format(c.items) + " items" : "no items yet"}</small></button>`).join("")
         : `<span class="muted">No stock data loaded yet: leave this empty and mention your buyer code in the note.</span>`;
     };
     draw();
@@ -251,6 +253,9 @@
   }
 
   const myCodes = () => (ST.me && ST.me.buyer_codes) || [];
+  const buyerName = code => { const b = ST.buyers.find(x => x.code === code); return b ? b.name : ""; };
+  const buyerLabel = code => buyerName(code) ? `${code} – ${buyerName(code)}` : code;
+  const firstName = code => (buyerName(code) || "").split(" ")[0];
   function renderBadge() {
     const a = $('#tabs a[data-tab="settings"]'); if (!a) return;
     a.innerHTML = "Settings" + (ST.requests.length ? `<span class="badge" title="Access requests waiting">${ST.requests.length}</span>` : "");
@@ -407,7 +412,7 @@
         ${seg("view", BUY_VIEWS, f.view)}
         ${seg("type", [["ALL", "All"], ["LOCAL", "Local"], ["FOREIGN", "Foreign"], ["IN-HOUSE", "In-house"]], f.type)}
         <select id="abc" aria-label="ABC class">${opts(["A", "B", "C"], f.abc, "All classes")}</select>
-        <select id="buyer" aria-label="Buyer">${myCodes().length ? `<option value="MINE" ${f.buyer === "MINE" ? "selected" : ""}>My items (${esc(myCodes().join(", "))})</option>` : ""}${opts(buyers, f.buyer, "All buyers")}</select>
+        <select id="buyer" aria-label="Buyer">${myCodes().length ? `<option value="MINE" ${f.buyer === "MINE" ? "selected" : ""}>My items (${esc(myCodes().join(", "))})</option>` : ""}<option value="" ${!f.buyer ? "selected" : ""}>All buyers</option>${buyers.map(b => `<option value="${esc(b)}" ${f.buyer === b ? "selected" : ""}>${esc(buyerLabel(b))}</option>`).join("")}</select>
         <span class="spacer"></span><span class="count-note" id="count"></span>
         <button class="btn small ghost" type="button" id="tog-sups">${hideSups() ? "Show suppliers" : "Hide suppliers"}</button>
       </div>
@@ -628,7 +633,7 @@
       </tbody></table></section>
       <section><h3>Details</h3><dl>
         <dt>Supplier</dt><dd>${esc(i.supplier || "—")} ${i.supplier_code ? `<span class="muted">(${esc(i.supplier_code)})</span>` : ""}</dd>
-        <dt>Buyer</dt><dd>${esc(i.buyer || "—")} <span class="muted">→ ${esc(i.type)} (${esc(i.typeSource)})</span></dd>
+        <dt>Buyer</dt><dd>${esc(i.buyer ? buyerLabel(i.buyer) : "—")} <span class="muted">→ ${esc(i.type)} (${esc(i.typeSource)})</span></dd>
         <dt>Product class</dt><dd>${esc(i.product_class || "—")}</dd>
         <dt>Product manager</dt><dd>${esc(i.product_manager || "—")}</dd>
         <dt>Unit cost (M1)</dt><dd>${rand(i.unit_cost)}</dd>
@@ -774,7 +779,8 @@
     const buyers = [...new Set(ST.res.items.map(i => i.buyer).filter(Boolean))].sort();
     const sel = (name, val, list) => `<select name="${name}">${list.map(([v, l]) => `<option value="${esc(v)}" ${String(v) === String(val) ? "selected" : ""}>${esc(l)}</option>`).join("")}</select>`;
     const types = [["LOCAL", "Local"], ["FOREIGN", "Foreign"], ["IN-HOUSE", "In-house"]];
-    const codeChips = picked => buyers.map(b => `<button type="button" class="chip-toggle ${picked.includes(b) ? "on" : ""}" data-code="${esc(b)}">${esc(b)}</button>`).join("");
+    const chipCodes = [...new Set(buyers.concat(ST.buyers.map(b => b.code)))].filter(c => !["INBRANCH", "IN-BRANCH", "PRODUCTION"].includes(c));
+    const codeChips = picked => chipCodes.map(b => `<button type="button" class="chip-toggle ${picked.includes(b) ? "on" : ""}" data-code="${esc(b)}" title="${esc(buyerName(b))}">${esc(b)}${firstName(b) ? ` <small>${esc(firstName(b))}</small>` : ""}</button>`).join("");
     $("#main").innerHTML = `
       <div class="page-head"><div class="grow"><h2>Settings</h2><p class="lede">Planning rules for everyone. Changes apply as soon as you save.</p></div></div>
       <form id="set" class="grid settings-sections">
@@ -798,7 +804,7 @@
           <span>Restock every</span><div class="inline-inputs"><input type="number" name="restockCycleDays" min="1" max="120" value="${S.restockCycleDays}"> days</div>
         </div></div>
         <div class="card"><h3>Buyer code → local / foreign</h3><p class="muted" style="margin-top:0">Used when Qlik doesn't say whether an item is local or foreign.</p><div class="form-grid">
-          ${buyers.map(b => `<span>${esc(b)} <span class="muted">(${nf0.format(ST.res.items.filter(i => i.buyer === b).length)} items)</span></span>${sel("bt_" + b, S.buyerTypes[b] || "", [["", "— not set —"], ...types])}`).join("")}
+          ${buyers.map(b => `<span>${esc(buyerLabel(b))} <span class="muted">(${nf0.format(ST.res.items.filter(i => i.buyer === b).length)} items)</span></span>${sel("bt_" + b, S.buyerTypes[b] || "", [["", "— not set —"], ...types])}`).join("")}
           <span>Anything else</span>${sel("unknownBuyerType", S.unknownBuyerType, types)}
         </div></div>
         <div style="grid-column:1/-1"><button class="btn primary" type="submit">Save settings</button> <span id="set-msg" class="muted"></span></div>
