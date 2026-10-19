@@ -96,7 +96,7 @@ label.chk { display: inline-flex; gap: 6px; align-items: center; cursor: pointer
 .tabs a:hover { color: #fff; }
 .tabs a.on { color: #fff; border-bottom-color: var(--brand); }
 body:not(.is-admin) .admin-only { display: none !important; }
-main { padding: 20px; max-width: 1500px; margin: 0 auto; }
+main { padding: 20px 24px; max-width: none; margin: 0; }
 .loading { padding: 60px; text-align: center; color: var(--muted); }
 h2 { font-family: var(--head); font-weight: 600; font-size: 22px; letter-spacing: .01em; margin: 0 0 4px; }
 h3 { font-size: 15px; margin: 0 0 10px; }
@@ -130,14 +130,14 @@ a.kpi:hover { border-color: var(--brand-text); }
 /* ---------- tables ---------- */
 .tbl-wrap { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); overflow: auto; box-shadow: var(--shadow); max-height: calc(100vh - 230px); }
 table.data { border-collapse: separate; border-spacing: 0; width: 100%; font-size: 13px; }
-table.data th { position: sticky; top: 0; background: var(--surface-2); text-align: left; font-weight: 600; color: var(--muted); padding: 9px 10px; border-bottom: 1px solid var(--line-strong); white-space: nowrap; cursor: pointer; user-select: none; z-index: 1; }
+table.data th { position: sticky; top: 0; background: var(--surface-2); text-align: left; font-weight: 600; color: var(--muted); padding: 8px 7px; border-bottom: 1px solid var(--line-strong); white-space: nowrap; cursor: pointer; user-select: none; z-index: 1; }
 table.data th.num { text-align: right; }
 table.data th .arrow { opacity: .8; }
-table.data td { padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+table.data td { padding: 7px 7px; border-bottom: 1px solid var(--line); vertical-align: top; }
 table.data tbody tr { cursor: pointer; }
 table.data tbody tr:hover td { background: var(--surface-2); }
 table.data td.code { font-weight: 600; white-space: nowrap; }
-table.data td.desc { min-width: 200px; max-width: 320px; }
+table.data td.desc { min-width: 180px; max-width: 300px; }
 table.data td.strong { font-weight: 700; }
 .more { padding: 10px; text-align: center; }
 .empty { padding: 40px; text-align: center; color: var(--muted); }
@@ -156,7 +156,9 @@ table.data td.strong { font-weight: 700; }
 .warn-dot { color: var(--st-urgent); font-weight: 700; }
 
 /* supplier list (buy page) */
-.buy-layout { display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 14px; }
+.buy-layout { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 14px; }
+.buy-layout.no-sups { grid-template-columns: minmax(0, 1fr); }
+.buy-layout.no-sups .sup-list { display: none; }
 @media (max-width: 1000px) { .buy-layout { grid-template-columns: 1fr; } }
 .sup-list { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); max-height: calc(100vh - 230px); overflow: auto; box-shadow: var(--shadow); }
 .sup-list h3 { padding: 12px 12px 6px; margin: 0; position: sticky; top: 0; background: var(--surface); }

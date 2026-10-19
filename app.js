@@ -342,6 +342,7 @@
   /* =====================================================================
      BUY (M1)
      ===================================================================== */
+  const hideSups = () => { try { return localStorage.getItem("sp-hide-sups") === "1"; } catch (e) { return false; } };
   const BUY_VIEWS = [["order", "To order"], ["make", "To make"], ["slow", "Slow movers"], ["all", "All items"]];
   function buyRows() {
     const f = ST.buy, q = f.q.trim().toLowerCase();
@@ -369,8 +370,10 @@
         <select id="abc" aria-label="ABC class">${opts(["A", "B", "C"], f.abc, "All classes")}</select>
         <select id="buyer" aria-label="Buyer">${opts(buyers, f.buyer, "All buyers")}</select>
         <span class="spacer"></span><span class="count-note" id="count"></span>
+        <button class="btn small ghost" type="button" id="tog-sups">${hideSups() ? "Show suppliers" : "Hide suppliers"}</button>
       </div>
-      <div class="buy-layout"><div class="sup-list" id="sups"></div><div id="tbl"></div></div>`;
+      <div class="buy-layout ${hideSups() ? "no-sups" : ""}"><div class="sup-list" id="sups"></div><div id="tbl"></div></div>`;
+    $("#tog-sups").onclick = () => { try { localStorage.setItem("sp-hide-sups", hideSups() ? "" : "1"); } catch (e) {} renderBuy(); };
     const draw = () => {
       const rows = buyRows();
       const sups = groupSuppliers(rows);
