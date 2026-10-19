@@ -703,7 +703,7 @@
       if (PREVIEW) { set(`Preview only: ${nf0.format(rows.length)} rows read, nothing saved.`, 1); return; }
       const { data: id, error } = await db.rpc("sp_import_begin", { p_file_name: name, p_report_date: date, p_source: "upload" });
       if (error) throw error;
-      const CH = 1000;
+      const CH = 200;
       for (let k = 0; k < rows.length; k += CH) {
         const { error: e2 } = await db.rpc("sp_import_rows", { p_import_id: id, p_rows: rows.slice(k, k + CH) });
         if (e2) throw e2;

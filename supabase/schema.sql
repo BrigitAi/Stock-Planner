@@ -192,7 +192,7 @@ grant update on public.sp_settings to authenticated;
 -- IMPORT FUNCTIONS
 -- Called by n8n (secret key) or by an admin uploading a file in the app.
 --   1. sp_import_begin(file_name, report_date, source)  → import id
---   2. sp_import_rows(import id, rows)                  → call once per batch (e.g. 1,000 rows)
+--   2. sp_import_rows(import id, rows)                  → call once per batch (e.g. 200 rows)
 --   3. sp_import_finish(import id)                      → swaps the new rows in
 -- Rows are the Qlik export rows exactly as they come out of the file
 -- (column headings as keys). Each row must have a "Warehouse" column.
@@ -205,16 +205,14 @@ create or replace function public.sp_norm(k text) returns text language sql immu
 $$;
 
 -- tolerant number: '', ' ', '-', null → 0; '1 234,5' → 1234.5
-create or replace function public.sp_num(v jsonb) returns numeric language plpgsql immutable as $$
-declare t text;
-begin
-  if v is null or jsonb_typeof(v) = 'null' then return 0; end if;
-  if jsonb_typeof(v) = 'number' then return (v #>> '{}')::numeric; end if;
-  t := regexp_replace(v #>> '{}', '[\s R]', '', 'g');
-  t := replace(t, ',', '.');
-  if t ~ '^-?[0-9]*\.?[0-9]+(e-?[0-9]+)?$' then return t::numeric; end if;
-  return 0;
-end $$;
+create or replace function public.sp_num(v jsonb) returns numeric language sql immutable parallel safe as $$
+  select case
+    when v is null or jsonb_typeof(v) = 'null' then 0
+    when jsonb_typeof(v) = 'number' then (v #>> '{}')::numeric
+    when replace(regexp_replace(v #>> '{}', '[\s\u00a0R]', '', 'g'), ',', '.') ~ '^-?[0-9]*\.?[0-9]+(e-?[0-9]+)?$'
+      then replace(regexp_replace(v #>> '{}', '[\s\u00a0R]', '', 'g'), ',', '.')::numeric
+    else 0 end
+$$;
 
 create or replace function public.sp_txt(v jsonb) returns text language sql immutable as $$
   select nullif(nullif(trim(v #>> '{}'), ''), '-')
@@ -251,9 +249,7 @@ end $$;
 
 create or replace function public.sp_import_rows(p_import_id uuid, p_rows jsonb)
 returns integer language plpgsql volatile security definer set search_path = public as $$
-declare
-  r jsonb; n jsonb; kv record; v_count int := 0; v_wh text; v_code text;
-  v_sales jsonb; v_issues jsonb; v_po jsonb; m text;
+declare v_count int;
 begin
   perform public.sp_check_import_rights();
   if not exists (select 1 from public.sp_imports where id = p_import_id and status = 'loading') then
@@ -262,47 +258,48 @@ begin
   if jsonb_typeof(p_rows) = 'object' and p_rows ? 'rows' then p_rows := p_rows -> 'rows'; end if;
   if jsonb_typeof(p_rows) <> 'array' then raise exception 'p_rows must be a JSON array of rows'; end if;
 
-  for r in select value from jsonb_array_elements(p_rows) loop
-    -- re-key the row with normalised headings, and pick up the monthly columns
-    n := '{}'; v_sales := '{}'; v_issues := '{}'; v_po := '{}';
-    for kv in select key, value from jsonb_each(r) loop
-      n := n || jsonb_build_object(public.sp_norm(kv.key), kv.value);
-      m := substring(public.sp_norm(kv.key) from '^sales qty - ([a-z]{3} [0-9]{4})$');
-      if m is not null then v_sales := v_sales || jsonb_build_object(public.sp_month(m), public.sp_num(kv.value)); end if;
-      m := substring(public.sp_norm(kv.key) from '^issues? qty - ([a-z]{3} [0-9]{4})$');
-      if m is not null then v_issues := v_issues || jsonb_build_object(public.sp_month(m), public.sp_num(kv.value)); end if;
-      m := substring(public.sp_norm(kv.key) from '^po due qty - ([a-z]{3} [0-9]{4})$');
-      if m is not null then v_po := v_po || jsonb_build_object(public.sp_month(m), public.sp_num(kv.value)); end if;
-    end loop;
-
-    v_code := upper(public.sp_txt(coalesce(n -> 'stockcode', n -> 'stock code')));
-    v_wh   := upper(public.sp_txt(n -> 'warehouse'));
-    continue when v_code is null or v_wh is null;
-
-    insert into public.sp_stock_staging (
-      stock_code, warehouse, description, long_description, obsolete, product_manager, drawing_no,
-      buyer, supplier_code, supplier, product_class, on_hold, unit_cost, qty_on_hand_m1, qty_available,
-      mtd_sold, sales, issues, mtd_issued, overdue_qty, po_due_qty, po_due, open_so_qty,
-      selling_price, gp_pct, lead_time_days, planner, abc_class, import_id, updated_at)
-    values (
-      v_code, v_wh,
-      public.sp_txt(n -> 'stock description'), public.sp_txt(n -> 'longdescription'),
-      upper(public.sp_txt(n -> 'obsolete stock')), public.sp_txt(n -> 'productmanager'),
-      public.sp_txt(n -> 'draw office num'),
-      upper(public.sp_txt(n -> 'buyer')), upper(public.sp_txt(n -> 'supplier code')), public.sp_txt(n -> 'supplier'),
-      public.sp_txt(n -> 'product class'), upper(public.sp_txt(n -> 'on hold')),
-      public.sp_num(n -> 'unit cost - m1'), public.sp_num(n -> 'qty on hand - m1'),
-      public.sp_num(coalesce(n -> 'qty available - all', n -> 'qty available')),
-      public.sp_num(n -> 'mtd qty sold'), v_sales, v_issues, public.sp_num(n -> 'mtd qty issued'),
-      public.sp_num(n -> 'overdue qty'), public.sp_num(n -> 'po due qty'), v_po,
-      public.sp_num(n -> 'open sales order qty (excl. sct)'),
-      public.sp_num(n -> 'selling price'), public.sp_num(n -> 'gp %'),
-      case when coalesce(n -> 'stock lead time (days)', n -> 'lead time (days)', n -> 'lead time', n -> 'leadtime') is null then null
-           else public.sp_num(coalesce(n -> 'stock lead time (days)', n -> 'lead time (days)', n -> 'lead time', n -> 'leadtime')) end,
-      upper(public.sp_txt(n -> 'planner')), upper(public.sp_txt(n -> 'abc class')),
-      p_import_id, now());
-    v_count := v_count + 1;
-  end loop;
+  -- one set-based pass (fast enough for Supabase's request time limit)
+  with kv as (
+    select t.ord, public.sp_norm(e.key) as k, e.value as v
+      from jsonb_array_elements(p_rows) with ordinality as t(r, ord)
+      cross join lateral jsonb_each(t.r) as e
+  ), n as (
+    select ord,
+           jsonb_object_agg(k, v) as j,
+           coalesce(jsonb_object_agg(public.sp_month(substring(k from '^sales qty - ([a-z]{3} [0-9]{4})$')), public.sp_num(v))
+                    filter (where k ~ '^sales qty - [a-z]{3} [0-9]{4}$'), '{}') as sales,
+           coalesce(jsonb_object_agg(public.sp_month(substring(k from '^issues? qty - ([a-z]{3} [0-9]{4})$')), public.sp_num(v))
+                    filter (where k ~ '^issues? qty - [a-z]{3} [0-9]{4}$'), '{}') as issues,
+           coalesce(jsonb_object_agg(public.sp_month(substring(k from '^po due qty - ([a-z]{3} [0-9]{4})$')), public.sp_num(v))
+                    filter (where k ~ '^po due qty - [a-z]{3} [0-9]{4}$'), '{}') as po
+      from kv group by ord
+  ), x as (
+    select n.*, upper(public.sp_txt(coalesce(j -> 'stockcode', j -> 'stock code'))) as code, upper(public.sp_txt(j -> 'warehouse')) as wh,
+           coalesce(j -> 'stock lead time (days)', j -> 'lead time (days)', j -> 'lead time', j -> 'leadtime') as lt
+      from n
+  )
+  insert into public.sp_stock_staging (
+    stock_code, warehouse, description, long_description, obsolete, product_manager, drawing_no,
+    buyer, supplier_code, supplier, product_class, on_hold, unit_cost, qty_on_hand_m1, qty_available,
+    mtd_sold, sales, issues, mtd_issued, overdue_qty, po_due_qty, po_due, open_so_qty,
+    selling_price, gp_pct, lead_time_days, planner, abc_class, import_id, updated_at)
+  select code, wh,
+    public.sp_txt(j -> 'stock description'), public.sp_txt(j -> 'longdescription'),
+    upper(public.sp_txt(j -> 'obsolete stock')), public.sp_txt(j -> 'productmanager'),
+    public.sp_txt(j -> 'draw office num'),
+    upper(public.sp_txt(j -> 'buyer')), upper(public.sp_txt(j -> 'supplier code')), public.sp_txt(j -> 'supplier'),
+    public.sp_txt(j -> 'product class'), upper(public.sp_txt(j -> 'on hold')),
+    public.sp_num(j -> 'unit cost - m1'), public.sp_num(j -> 'qty on hand - m1'),
+    public.sp_num(coalesce(j -> 'qty available - all', j -> 'qty available')),
+    public.sp_num(j -> 'mtd qty sold'), sales, issues, public.sp_num(j -> 'mtd qty issued'),
+    public.sp_num(j -> 'overdue qty'), public.sp_num(j -> 'po due qty'), po,
+    public.sp_num(j -> 'open sales order qty (excl. sct)'),
+    public.sp_num(j -> 'selling price'), public.sp_num(j -> 'gp %'),
+    case when lt is null then null else public.sp_num(lt) end,
+    upper(public.sp_txt(j -> 'planner')), upper(public.sp_txt(j -> 'abc class')),
+    p_import_id, now()
+  from x where code is not null and wh is not null;
+  get diagnostics v_count = row_count;
 
   update public.sp_imports set row_count = row_count + v_count where id = p_import_id;
   return v_count;

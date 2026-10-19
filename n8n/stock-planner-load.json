@@ -51,7 +51,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Split the rows into batches of 1,000 for the planner\nconst rows = $('Extract from File').all().map(i => i.json);\nconst id = $('Begin import').first().json.import_id;\nconst size = 1000, out = [];\nfor (let k = 0; k < rows.length; k += size) out.push({ json: { p_import_id: id, p_rows: rows.slice(k, k + size) } });\nreturn out;"
+        "jsCode": "// Split the rows into batches of 200 for the planner\nconst rows = $('Extract from File').all().map(i => i.json);\nconst id = $('Begin import').first().json.import_id;\nconst size = 200, out = [];\nfor (let k = 0; k < rows.length; k += size) out.push({ json: { p_import_id: id, p_rows: rows.slice(k, k + size) } });\nreturn out;"
       },
       "name": "Make batches",
       "type": "n8n-nodes-base.code",
