@@ -2,7 +2,7 @@
 
 Buying and branch-restock suggestions for Brigit, worked out from the Qlik **Stock Planning** report.
 
-**Live app:** https://brigitai.github.io/stock-planner/ (Brigit login required)
+**Live app:** https://brigitai.github.io/Stock-Planner/ (Brigit login required)
 
 ```
 Qlik Stock Planning report ──(n8n, per warehouse)──▶ Supabase (sp_* tables) ──▶ this app (GitHub Pages)
@@ -37,7 +37,7 @@ All of these can be changed by an admin under **Settings**.
 
 ### 1. Supabase
 1. Supabase → **SQL Editor** → New query → paste [`supabase/schema.sql`](supabase/schema.sql) → **Run**. It only adds `sp_*` tables and is safe to run again after updates.
-2. Supabase → **Authentication → URL Configuration → Redirect URLs** → add `https://brigitai.github.io/stock-planner/` (needed for password-reset links).
+2. Supabase → **Authentication → URL Configuration → Redirect URLs** → add `https://brigitai.github.io/Stock-Planner/` (needed for password-reset links).
 3. The first admins are added at the bottom of the script. Add buyers in the app under **Settings → Who can use the planner**.
 
 ### 2. n8n (Qlik → planner)
