@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Brigit Stock Planner</title>
+<link rel="icon" href="logo.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Oswald:wght@500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- ===== SIGN IN ===== -->
+<section id="login" class="gate" hidden>
+  <div class="gate-card">
+    <img src="logo.png" alt="Brigit Fire" class="gate-logo">
+    <h1>Stock Planner</h1>
+    <div class="auth-tabs" role="tablist">
+      <button type="button" class="auth-tab" data-mode="signin">Sign in</button>
+      <button type="button" class="auth-tab" data-mode="register">Register</button>
+    </div>
+
+    <form id="f-signin" class="auth-form" data-mode="signin" hidden>
+      <p class="muted">Sign in with your Brigit email and password. If you play the Trivia League, it's the same login.</p>
+      <input name="email" type="email" placeholder="name@brigit.co.za" autocomplete="username" aria-label="Email" required>
+      <input name="password" type="password" placeholder="Password" autocomplete="current-password" aria-label="Password" required>
+      <button class="btn primary" type="submit">Sign in</button>
+      <p class="auth-links"><a href="#" data-goto="forgot">Forgot password?</a> · <a href="#" data-goto="register">New here? Register</a></p>
+    </form>
+
+    <form id="f-register" class="auth-form" data-mode="register" hidden>
+      <p class="muted">First time? Register with your Brigit email and choose a password. We'll email you a code to confirm it's you.</p>
+      <input name="email" type="email" placeholder="name@brigit.co.za" autocomplete="username" aria-label="Email" required>
+      <input name="password" type="password" placeholder="Choose a password (at least 8 characters)" autocomplete="new-password" minlength="8" aria-label="New password" required>
+      <input name="password2" type="password" placeholder="Type the password again" autocomplete="new-password" minlength="8" aria-label="Confirm password" required>
+      <button class="btn primary" type="submit">Register</button>
+      <p class="auth-links"><a href="#" data-goto="signin">Already registered? Sign in</a></p>
+    </form>
+
+    <form id="f-code" class="auth-form" data-mode="code" hidden>
+      <p class="muted">We've emailed a code to <b class="auth-email"></b>. Enter it below to finish registering.</p>
+      <input name="code" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="Code from the email" maxlength="10" aria-label="Code" required>
+      <button class="btn primary" type="submit">Confirm</button>
+      <p class="auth-links"><a href="#" id="resend-code">Send the code again</a> · <a href="#" data-goto="register">Use a different email</a></p>
+    </form>
+
+    <form id="f-forgot" class="auth-form" data-mode="forgot" hidden>
+      <p class="muted">Enter your Brigit email and we'll send you a code to set a new password.</p>
+      <input name="email" type="email" placeholder="name@brigit.co.za" autocomplete="username" aria-label="Email" required>
+      <button class="btn primary" type="submit">Email me a code</button>
+      <p class="auth-links"><a href="#" data-goto="signin">Back to sign in</a></p>
+    </form>
+
+    <form id="f-reset" class="auth-form" data-mode="reset" hidden>
+      <p class="muted reset-intro">We've emailed a code to <b class="auth-email"></b>. Enter it and choose a new password.</p>
+      <input name="email" type="email" autocomplete="username" hidden>
+      <input name="code" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="Code from the email" maxlength="10" aria-label="Code">
+      <input name="password" type="password" placeholder="New password (at least 8 characters)" autocomplete="new-password" minlength="8" aria-label="New password" required>
+      <input name="password2" type="password" placeholder="Type the new password again" autocomplete="new-password" minlength="8" aria-label="Confirm new password" required>
+      <button class="btn primary" type="submit">Save new password</button>
+      <p class="auth-links"><a href="#" data-goto="signin">Back to sign in</a></p>
+    </form>
+    <p id="login-msg" class="login-msg" role="status"></p>
+  </div>
+</section>
+
+<!-- ===== SIGNED IN BUT NOT ON THE LIST ===== -->
+<section id="noaccess" class="gate" hidden>
+  <div class="gate-card">
+    <img src="logo.png" alt="Brigit Fire" class="gate-logo">
+    <h1>Almost there</h1>
+    <p>You're signed in as <b id="na-email"></b>, but you haven't been given access to the Stock Planner yet.</p>
+    <p class="muted">Ask Lasya (ERP &amp; BI) to add you. Then refresh this page.</p>
+    <button class="btn" id="na-signout" type="button">Sign out</button>
+  </div>
+</section>
+
+<!-- ===== APP ===== -->
+<div id="app" hidden>
+  <header class="topbar">
+    <div class="brand"><img src="logo.png" alt="Brigit Fire"><span>Stock Planner</span></div>
+    <div class="freshness" id="freshness"></div>
+    <div class="who"><span id="who"></span><button class="btn ghost small" id="signout" type="button">Sign out</button></div>
+  </header>
+  <nav class="tabs" id="tabs" aria-label="Sections">
+    <a href="#overview" data-tab="overview">Overview</a>
+    <a href="#buy" data-tab="buy">Buy (M1)</a>
+    <a href="#restock" data-tab="restock">Branch restock</a>
+    <a href="#health" data-tab="health">Stock health</a>
+    <a href="#exceptions" data-tab="exceptions">Exceptions</a>
+    <a href="#data" data-tab="data">Data</a>
+    <a href="#settings" data-tab="settings" class="admin-only">Settings</a>
+  </nav>
+  <main id="main"><div class="loading" id="loading">Loading stock data…</div></main>
+</div>
+
+<!-- item detail -->
+<div id="scrim" hidden></div>
+<aside id="drawer" hidden aria-label="Item detail"></aside>
+<div id="toast" role="status" hidden></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="config.js"></script>
+<script src="engine.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

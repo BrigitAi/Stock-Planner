@@ -1,0 +1,168 @@
+{
+  "name": "Stock Planner – load Qlik export",
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "name": "When called by another workflow",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "xlsx",
+        "binaryPropertyName": "data",
+        "options": {}
+      },
+      "name": "Extract from File",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://sxxfuxwgxeitvkbtywhp.supabase.co/rest/v1/rpc/sp_import_start",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ p_file_name: ($('When called by another workflow').first().binary?.data?.fileName) || 'Qlik Stock Planning export', p_source: 'n8n' }) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "name": "Begin import",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        0
+      ],
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Split the rows into batches of 1,000 for the planner\nconst rows = $('Extract from File').all().map(i => i.json);\nconst id = $('Begin import').first().json.import_id;\nconst size = 1000, out = [];\nfor (let k = 0; k < rows.length; k += size) out.push({ json: { p_import_id: id, p_rows: rows.slice(k, k + size) } });\nreturn out;"
+      },
+      "name": "Make batches",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://sxxfuxwgxeitvkbtywhp.supabase.co/rest/v1/rpc/sp_import_rows",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "name": "Send rows",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://sxxfuxwgxeitvkbtywhp.supabase.co/rest/v1/rpc/sp_import_finish",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ p_import_id: $('Begin import').first().json.import_id }) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "name": "Finish import",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1100,
+        0
+      ],
+      "executeOnce": true
+    }
+  ],
+  "connections": {
+    "When called by another workflow": {
+      "main": [
+        [
+          {
+            "node": "Extract from File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract from File": {
+      "main": [
+        [
+          {
+            "node": "Begin import",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Begin import": {
+      "main": [
+        [
+          {
+            "node": "Make batches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Make batches": {
+      "main": [
+        [
+          {
+            "node": "Send rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send rows": {
+      "main": [
+        [
+          {
+            "node": "Finish import",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
